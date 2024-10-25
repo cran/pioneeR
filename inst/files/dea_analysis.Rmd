@@ -1,0 +1,207 @@
+---
+title: "Data Envelopment Analysis"
+output: pdf_document
+params:
+  data: NA
+  org_data: NA
+  inputs: NA
+  outputs: NA
+  model: NA
+  model_params: NA
+  params: NA
+  plots: NA
+  settings: NA
+---
+
+```{r, setup, include=FALSE}
+mod <- list(
+  rts = switch(params$model_params$rts,
+    'crs' = 'constant returns to scale',
+    'vrs' = 'variable returns to scale',
+    'nirs' = 'non-increasing returns to scale',
+    'ndrs' = 'non-decreasing returns to scale'
+  ),
+  orient = switch(params$model_params$orientation,
+    'in' = 'input oriented',
+    'out' = 'output oriented'
+  )
+)
+```
+
+## Data set
+
+```{r, echo=FALSE}
+txt <- ''
+if (nrow(params$data) != nrow(params$org_data)) {
+  txt <- sprintf(
+    'The data set has been subsetted in the analysis. The original dataset included
+    %s rows, compared to %s rows in the data set used in the analysis.',
+    nrow(params$org_data), nrow(params$data)
+  )
+}
+```
+
+The data set consists of `r nrow(params$data)` observations and `r ncol(params$data)` variables. `r txt`
+
+## Variables
+
+The following variables were used as input variables: `r paste(params$params$inputs, sep = ', ')`, with the following characteristics:
+
+```{r, echo=FALSE}
+df <- t(apply(params$inputs, 2, summary))
+knitr::kable(df)
+```
+
+The following variables were used as output variables: `r paste(params$params$outputs, sep = ', ')`, with the following characteristics:
+
+```{r, echo=FALSE}
+df <- t(apply(params$outputs, 2, summary))
+knitr::kable(df)
+```
+
+## Model summary
+
+The technology for the model is `r mod$rts` and the orientation is `r mod$orient`.
+
+```{r, echo=FALSE}
+tbl <- summary_tbl_dea(params$model$values)
+knitr::kable(tbl)
+```
+
+```{r, echo=FALSE}
+x <- summary(params$model$values)
+x <- data.frame(as.list(x))
+colnames(x) <- gsub('^X', '', colnames(x))
+knitr::kable(x)
+```
+
+## Efficiency scores
+
+The efficiency scores have been estimated using the `dea` function from the `Benchmarking` package in R. Based on the input variables, output variables, returns to scale and orientation stated above, the following efficiency scores have been estimated:
+
+```{r, echo=FALSE}
+d <- data.frame(
+  `Efficiency score` = round(params$model$values, params$settings$digits),
+  check.names = FALSE
+)
+knitr::kable(d)
+```
+
+## Distribution
+
+```{r, eval=TRUE, echo=FALSE}
+if (params$params$normalize) {
+  txt <- 'The input data has been normalized so that each variable has a mean of 1.'
+} else {
+  txt <- 'The input data has not been altered.'
+}
+```
+
+Below is a Salter diagram of all the decision making units in the analysis. The height of the bars are determined by the efficiency score for each unit. The width of the bars are determined by the sum of the combined inputs. `r txt`
+
+```{r, eval=TRUE, echo=FALSE}
+require(ggplot2)
+
+params$plots$salter_plot
+```
+
+## Scale efficiency
+
+Scale efficiency can be used to determine if a unit operates at optimal size or not. The scale efficiency is calculated as the ratio of the technical efficiency under the assumption of CRS (constant returns to scale) over the technical efficiency under the assumption of VRS (variable returns to scale).
+
+A shortcoming when measuring scale efficiency is that you do not know if the unit is operating under an increasing returns to scale (and thus a sub-optimal scale) or a decreasing returns to scale (and thus a supra-optimal scale). We can check this by taking into account the ratio of the technical efficiency under the assumption of VRS over the technical efficiency under the assumption of NIRS (non-increasing returns to scale).
+
+If efficiency scores for a unit differs in the CRS and VRS models and the ratio of the NIRS and VRS models is equal to 1, the unit should *decrease* its size. When the CRS and VRS models differ, and the ratio of the NIRS and VRS models is *not*  equal to 1, the unit should *increase* its size.
+
+A summary of scale efficiency and the optimal scale size is shown in the table below:
+
+```{r, echo=FALSE}
+tbl <- compute_scale_efficiency(
+  params$inputs,
+  params$outputs,
+  params$model_params$orientation,
+  digits = params$settings$digits)
+knitr::kable(tbl)
+```
+
+## Reproducability
+
+The code below can be used to reproduce the analysis that is the basis for this report. The code assumes that you have downloaded the data set as an RDS file, and loaded this into the current R session as the object `df`.
+
+You can read in the data with the `readRDS()` function in R, and assign the file contents to `df`.
+
+```{r, include=FALSE}
+library(knitr)
+library(stringr)
+default_source_hook <- knit_hooks$get('source')
+
+# Solution from
+# https://stackoverflow.com/questions/43699235/replace-variables-with-their-corresponding-values-in-source-code-chunk
+
+knit_hooks$set(source = function(x, options) {
+  x <- str_replace_all(
+    x, pattern = 'params\\$params\\$id', sprintf("'%s'", params$params$id))
+  x <- str_replace_all(
+    x, pattern = 'params\\$inputs',
+    paste0("'", paste(colnames(params$inputs), collapse = '\',\n\  \''), "'"))
+  x <- str_replace_all(
+    x, pattern = 'params\\$outputs',
+    paste0("'", paste(colnames(params$outputs), collapse = '\',\n\  \''), "'"))
+  x <- str_replace_all(
+    x, pattern = 'params\\$params\\$normalize', sprintf("%s", params$params$normalize))
+  x <- str_replace_all(
+    x, pattern = 'params\\$model_params\\$rts', sprintf("'%s'", params$model_params$rts))
+  x <- str_replace_all(
+    x, pattern = 'params\\$model_params\\$orientation', sprintf("'%s'", params$model_params$orientation))
+  default_source_hook(x, options)
+})
+```
+
+```{r, echo=TRUE, eval=FALSE}
+# Note: you need to load the data set first as `df`
+# Use `df <- readRDS('dea.rds')` to load the data
+# Remember to check the working directory with `getwd()` and change the working
+# directory if necessary with `setwd()`.
+
+library(pioneeR)
+library(Benchmarking)
+
+rts <- params$model_params$rts
+orientation <- params$model_params$orientation
+
+idvar <- params$params$id
+inputs <- c(params$inputs)
+outputs <- c(params$outputs)
+
+# Estimate the DEA model
+model <- compute_dea(
+  df,
+  idvar,
+  inputs,
+  outputs,
+  rts = rts,
+  orientation = orientation
+)
+
+# Print out the summary of the DEA model
+summary_tbl_dea(model)
+
+# Estimate the model with slack and super efficiency
+model <- compute_dea(
+  df,
+  idvar,
+  inputs,
+  outputs,
+  rts = rts,
+  orientation = orientation,
+  slack = TRUE,
+  super = TRUE
+)
+
+# Create input and output matrises for scale efficiency
+x <- create_matrix(df, inputs, idvar, normalize = params$params$normalize)
+y <- create_matrix(df, outputs, idvar, normalize = params$params$normalize)
+
+# Get table for scale efficiency
+compute_scale_efficiency(x, y, orientation, digits = 4L)
+```
